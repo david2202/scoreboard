@@ -19,45 +19,42 @@
 #include <EEPROMAnything.h>
 #include <Buttons.h>
 #include <ScoreboardCommon.h>
-#include <Adafruit_CC3000.h>
-#include <ccspi.h>
 #include <SPI.h>
 #include "nRF24L01.h"
 #include "RF24.h"
+#include <Adafruit_WINC1500.h>
 #include <string.h>
 
-//#define DEBUG
+#define DEBUG
 
-// These are the interrupt and control pins
-#define ADAFRUIT_CC3000_IRQ   3  // MUST be an interrupt pin!
-// These can be any two pins
-// Mega
-#define ADAFRUIT_CC3000_VBAT  47
-#define ADAFRUIT_CC3000_CS    48
+// Define the WINC1500 board connections below.
+// If you're following the Adafruit WINC1500 board
+// guide you don't need to modify these:
+#define WINC_CS   48
+#define WINC_IRQ  3
+#define WINC_RST  47
 
-// Use hardware SPI for the remaining pins
-// On an UNO, SCK = 13, MISO = 12, and MOSI = 11
-// On a Mega, SCK = 52, MISO = 50, and MOSI = 51
-Adafruit_CC3000 cc3000 = Adafruit_CC3000(ADAFRUIT_CC3000_CS, ADAFRUIT_CC3000_IRQ, ADAFRUIT_CC3000_VBAT,
-                                         SPI_CLOCK_DIV4); // you can change this clock speed
+// Setup the WINC1500 connection with the pins above and the default hardware SPI.
+Adafruit_WINC1500 WiFi(WINC_CS, WINC_IRQ, WINC_RST);
 
-#define WLAN_SSID           "XT1068 4797"           // cannot be longer than 32 characters!
-//#define WLAN_SSID             "NETGEAR26"             // cannot be longer than 32 characters!
-//#define WLAN_SSID           "NETGEAR-Guest"         // cannot be longer than 32 characters!
-#define WLAN_PASS             "rockycurtain281"
-#define WLAN_CONNECT_RETRIES  3
+char ssid[] = "NETGEAR26";       //  your network SSID (name)
+//char ssid[] = "XT1068 4797";       //  your network SSID (name)
+char pass[] = "rockycurtain281"; // your network password (use for WPA, or use as key for WEP)
+int keyIndex = 0;                // your network key Index number (needed only for WEP)
 
-// Security can be WLAN_SEC_UNSEC, WLAN_SEC_WEP, WLAN_SEC_WPA or WLAN_SEC_WPA2
-#define WLAN_SECURITY   WLAN_SEC_WPA2
+int status = WL_IDLE_STATUS;
+// if you don't want to use DNS (and reduce your sketch size)
+// use the numeric IP instead of the name for the server:
+//IPAddress server(141,101,112,175);  // numeric IP for test page (no DNS)
+char server[] = "192.168.0.96";    // domain name for test page (using DNS)
+int port = 8080;
 
-#define IDLE_TIMEOUT_MS  3000      // Amount of time to wait (in milliseconds) with no data 
-                                   // received before closing the connection.  If you know the server
-                                   // you're accessing is quick to respond, you can reduce this value.
-#define SEND_TIME_MS     30000
+// Initialize the Ethernet client library
+// with the IP address and port of the server
+// that you want to connect to (port 80 is default for HTTP):
+Adafruit_WINC1500Client client;
 
-// ELB address
-#define WEBSITE      "ec2-52-27-239-27.us-west-2.compute.amazonaws.com"
-#define PORT         80
+#define IDLE_TIMEOUT_MS  3000
 
 // Constants
 const byte NBR_OF_BUTTONS = 7;                   // Number of buttons pins
@@ -65,6 +62,14 @@ const int MODE_TIME = 3000;                      // Time (in millis) that plus m
 const int DEBOUNCE_DELAY = 40;                   // Delay time for debouncing buttons
 const int REPEAT_INITIAL_DELAY = 1000;           // How long button must be held down before it starts repeating
 const int REPEAT_DELAY = 100;                    // How long between repeats
+
+void inningsOrReset(Button* button);
+void mode(Button* button);
+void wicket(Button* button);
+void run(Button* button);
+void noScore(Button* button);
+void legBye(Button* button);
+void extra(Button* button);
 
 // Button locations (relative to  buttonPin array)
 Button* button[] = {new DigitalButton(22, INPUT_PULLUP, DEBOUNCE_DELAY, REPEAT_INITIAL_DELAY, REPEAT_DELAY, inningsOrReset),
@@ -89,7 +94,7 @@ LiquidCrystal lcd(39, 38, 37, 36, 35, 34);      // create an lcd object and assi
 // Set up nRF24L01 radio on SPI bus plus pins 49 & 53 (as we are using a Mega)
 RF24 radio(49,53);
 
-//SPISettings settingsCC3000(SPI_CLOCK_DIV4, MSBFIRST, SPI_MODE1); 
+//SPISettings settingsCC3000(SPI_CLOCK_DIV4, MSBFIRST, SPI_MODE0); 
 //SPISettings settingsRF24(SPI_CLOCK_DIV4, MSBFIRST, SPI_MODE0); 
 
 long modeOnTime = 0;                            // The time plus mode was turned on
@@ -99,13 +104,13 @@ boolean modeFirstPress = true;                  // Is it the first button press 
 boolean scoreDirty = false;                     // Does the score need to be sent to the remote?
 score_t score;
 
-// 192.168.0.98
-//uint32_t ip = 3232235618;
-uint32_t ip = 0;
 unsigned long sendTime = 0;
-Adafruit_CC3000_Client www;
 
 void setup() {
+  while (!Serial) {
+    ; // wait for serial port to connect. Needed for native USB port only
+  }
+  
   Serial.begin(115200);
   lcd.begin(16, 2);                             // Set the display to 16 columns and two rows
   lcd.clear();
@@ -113,7 +118,7 @@ void setup() {
   EEPROM_readAnything(0, score);                // Read the saved score from EEPROM
 
   initialiseRadio();
-  // initialiseWiFi();
+  initialiseWiFi();
 
   lcd.clear();
   displayScore();                               // Display the score for the first time
@@ -128,7 +133,7 @@ void loop(){
       lcd.setCursor(15, 1);
       lcd.print(char(B01011100));
       sendScoreRadio();
-      // sendScoreWiFi();
+      sendScoreWiFi();
       lcd.setCursor(15, 1);
       lcd.print(F(" "));
       sendTime = millis();
@@ -157,8 +162,8 @@ void sendScoreRadio() {
 
 void sendScoreWiFi() {
 //  SPI.beginTransaction(settingsCC3000);
-  connectTCP();
-  if (www.connected()) {
+  // if you get a connection, report back via serial:
+  if (client.connect(server, port)) {
     #ifdef DEBUG
       Serial.println("send-begin");
     #endif
@@ -182,16 +187,16 @@ void sendScoreWiFi() {
       Serial.println(payload);
     #endif
 
-    www.fastrprintln(F("POST /score HTTP/1.1"));
-    www.fastrprint(F("Host: ")); www.fastrprint(WEBSITE); www.fastrprint(":"); www.fastrprintln(String(PORT).c_str());
-    www.fastrprintln(F("Connection: keep-alive"));
-    www.fastrprint(F("Content-Length: ")); www.fastrprintln(String(payload.length()).c_str());
-    www.fastrprintln(F("Cache-Control: no-cache"));
-    www.fastrprintln(F("Content-Type: application/json"));
-    www.fastrprintln(F("Accept: */*"));
-    www.println();
-    www.fastrprint(payload.c_str());
-    www.println();
+    client.println(F("POST /score HTTP/1.1"));
+    client.print(F("Host: ")); client.print(server); client.print(":"); client.println(String(port).c_str());
+    client.println(F("Connection: keep-alive"));
+    client.print(F("Content-Length: ")); client.println(String(payload.length()).c_str());
+    client.println(F("Cache-Control: no-cache"));
+    client.println(F("Content-Type: application/json"));
+    client.println(F("Accept: */*"));
+    client.println();
+    client.print(payload.c_str());
+    client.println();
     #ifdef DEBUG
       Serial.println("send-end");
     #endif
@@ -209,31 +214,21 @@ void sendScoreWiFi() {
 void receiveResponseWiFi() {
 //  SPI.beginTransaction(settingsCC3000);
     // Read any data that is available
-  while (www.connected() && www.available()) {
-    char c = www.read();
+  while (client.available()) {
+    char c = client.read();
     #ifdef DEBUG
       Serial.print(c);
     #endif
   }
 
   // Give up waiting and close connection
-  if (www.connected() && millis() > sendTime + IDLE_TIMEOUT_MS) {
+  if (client.connected() && millis() > sendTime + IDLE_TIMEOUT_MS) {
     #ifdef DEBUG
       Serial.println(F("-------------------------------------"));
     #endif
-    disconnectTCP();
+    client.stop();
   }
   //SPI.endTransaction();
-}
-
-void connectTCP() {
-  if (!www.connected()) {
-    www = cc3000.connectTCP(ip, PORT);
-  }
-}
-
-void disconnectTCP() {
-  www.close();
 }
 
 /*
@@ -580,119 +575,49 @@ void initialiseWiFi() {
   lcd.setCursor(0, 1);
   lcd.print(F("WiFi:  Starting"));
   #ifdef DEBUG
-    Serial.println(F("Hello, CC3000!"));
+    Serial.println(F("Hello, WINC1500!"));
     Serial.println(F("Initializing..."));
   #endif
-  
-  if (!cc3000.begin()) {
-    lcd.setCursor(7, 1);
-    lcd.print(F("Failed  "));
-    #ifdef DEBUG
-      Serial.println(F("Couldn't begin()! Check your wiring?"));
-    #endif
-    delay(1000);
-    return;
-  }
-//  cc3000.reboot();
-//  cc3000.deleteProfiles();
-  cc3000.setDHCP();
-  lcd.setCursor(7, 1);
-  lcd.print(WLAN_SSID);
 
-  #ifdef DEBUG
-    Serial.print(F("Attempting to connect to ")); Serial.println(WLAN_SSID);
-  #endif
-  if (!cc3000.connectToAP(WLAN_SSID, WLAN_PASS, WLAN_SECURITY, WLAN_CONNECT_RETRIES)) {
-    lcd.setCursor(7, 1);
-    lcd.print(F("Failed connect"));
+  // check for the presence of the shield:
+  if (WiFi.status() == WL_NO_SHIELD) {
     #ifdef DEBUG
-      Serial.println(F("Failed!"));
+      Serial.println("WiFi shield not present");
     #endif
-    delay(1000);
-    return;
+    lcd.setCursor(0, 1);
+    lcd.print(F("WiFi:  Shield not present"));
+    while (true);
   }
 
+  // attempt to connect to Wifi network:
+  while (WiFi.status() != WL_CONNECTED) {
+    lcd.setCursor(7, 1);
+    lcd.print("ssid");
+    #ifdef DEBUG
+      Serial.print(F("Attempting to connect to SSID: "));
+      Serial.println(ssid);
+    #endif
+    
+    // Connect to WPA/WPA2 network. Change this line if using open or WEP network:
+    status = WiFi.begin(ssid, pass);
+
+    // wait 10 seconds for connection:
+    uint8_t timeout = 10;
+    while (timeout && (WiFi.status() != WL_CONNECTED)) {
+      timeout--;
+      delay(1000);
+    }
+  }
+
   lcd.setCursor(7, 1);
-  lcd.print(F("DHCP  "));
+  lcd.print(F("Connected"));
 
   #ifdef DEBUG
     Serial.println(F("Connected!"));
-    Serial.println(F("Request DHCP"));
+    displayConnectionDetails();
   #endif
-  
-  int i = 0;
-  while (!cc3000.checkDHCP()) {
-    lcd.setCursor(7, 1);
-    lcd.print(F("DHCP #"));
-    lcd.print(i);
-    lcd.print(F("  "));
-    #ifdef DEBUG
-      Serial.print(F("DHCP failed #"));
-      Serial.println(i);
-    #endif
-    if (i++ > 10) {
-      #ifdef DEBUG
-        Serial.println(F("Failed to get IP address!"));
-      #endif
-      return;
-    }
-    delay(1000);
-  }
 
-  i = 0;
-  while (!displayConnectionDetails()) {
-    #ifdef DEBUG
-      Serial.print(F("Display connection details failed #"));
-      Serial.println(i);
-    #endif
-    if (i++ > 10) {
-      #ifdef DEBUG
-        Serial.println(F("Failed to get IP address!"));
-      #endif
-      return;
-    }
-    delay(1000);
-  }
-
-  if (ip != 0) {
-    #ifdef DEBUG
-      Serial.println(F("Skipping DNS lookup - hardcoded IP"));
-    #endif
-  } else {
-    lcd.setCursor(7, 1);
-    lcd.print(F("DNS   "));
-
-    #ifdef DEBUG
-      Serial.print(F("Attempting DNS lookup for "));
-      Serial.println(WEBSITE);
-    #endif
-    i = 0;
-    while (!cc3000.getHostByName(WEBSITE, &ip)) {
-      lcd.setCursor(7, 1);
-      lcd.print(F("DNS #"));
-      lcd.print(i);
-      #ifdef DEBUG
-        Serial.print(F("Resolve attempt failed #"));
-        Serial.println(i);
-      #endif
-      if (i++ > 10) {
-        #ifdef DEBUG
-          Serial.println(F("DNS failed to resolve host"));
-        #endif
-        return;
-      }
-      delay(100);
-    }
-  }
-  lcd.setCursor(7, 1);
-  lcd.print(F("Complete"));
   delay(1000);
-  #ifdef DEBUG
-    Serial.print(F("Resolved host to IP address: "));
-    cc3000.printIPdotsRev(ip);
-    Serial.println();
-    Serial.println(F("CC3000 initialisation complete"));
-  #endif
   //SPI.endTransaction();
 }
 
@@ -702,19 +627,21 @@ void initialiseWiFi() {
 */
 /**************************************************************************/
 bool displayConnectionDetails(void) {
-  uint32_t ipAddress, netmask, gateway, dhcpserv, dnsserv;
+  #ifdef DEBUG
+    // print the SSID of the network you're attached to:
+    Serial.print("SSID: ");
+    Serial.println(WiFi.SSID());
   
-  if(!cc3000.getIPAddress(&ipAddress, &netmask, &gateway, &dhcpserv, &dnsserv)) {
-    return false;
-  } else {
-    #ifdef DEBUG
-      Serial.print(F("\nIP Addr: ")); cc3000.printIPdotsRev(ipAddress);
-      Serial.print(F("\nNetmask: ")); cc3000.printIPdotsRev(netmask);
-      Serial.print(F("\nGateway: ")); cc3000.printIPdotsRev(gateway);
-      Serial.print(F("\nDHCPsrv: ")); cc3000.printIPdotsRev(dhcpserv);
-      Serial.print(F("\nDNSserv: ")); cc3000.printIPdotsRev(dnsserv);
-      Serial.println();
-    #endif
-    return true;
-  }
+    // print your WiFi shield's IP address:
+    IPAddress ip = WiFi.localIP();
+    Serial.print("IP Address: ");
+    Serial.println(ip);
+  
+    // print the received signal strength:
+    long rssi = WiFi.RSSI();
+    Serial.print("signal strength (RSSI):");
+    Serial.print(rssi);
+    Serial.println(" dBm");
+  #endif
+  return true;
 }
