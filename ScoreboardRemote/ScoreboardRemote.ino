@@ -104,6 +104,7 @@ boolean scoreDirty = false;                     // Does the score need to be sen
 score_t score;
 
 unsigned long sendTime = 0;
+unsigned int eepromStart = sizeof(score);       // We've worn out the first block of EEPROM
 
 void setup() {
   while (!Serial) {
@@ -114,7 +115,7 @@ void setup() {
   lcd.begin(16, 2);                             // Set the display to 16 columns and two rows
   lcd.clear();
   
-  EEPROM.readBlock(0, score);                  // Read the saved score from EEPROM
+  EEPROM.readBlock(eepromStart, score);         // Read the saved score from EEPROM
 
   initialiseRadio();
   wifiConnected = initialiseWiFi();
@@ -125,7 +126,7 @@ void setup() {
 
 void loop(){
   readButtons();
-  if (opMode == SCOREBOARD_OPMODE && (modeOnTime + MODE_TIME)                 // Check if mode has expired
+  if (opMode == SCOREBOARD_OPMODE && currentMode != NO_MODE && (modeOnTime + MODE_TIME)                 // Check if mode has expired
     < millis()) {
     clearMode();
     if (scoreDirty) {
@@ -255,7 +256,8 @@ void clearMode() {
   }
   if (score.balls == 0                               // If it's the first ball of the over
       && !anyRepeating()) {                          // and we're not repeating (i.e. button held down)
-    EEPROM.writeBlock(0, score);                  // Store the current score in EEPROM
+        Serial.println("Writing 1");
+    EEPROM.writeBlock(eepromStart, score);           // Store the current score in EEPROM
   }
 }
 
@@ -327,7 +329,9 @@ void reset() {
   score.targetOvers = 0;
   score.targetBalls = 0;
   clearMode();
-  EEPROM.writeBlock(0, score);
+  Serial.println("Writing 2");
+
+  EEPROM.writeBlock(eepromStart, score);
 }
 
 /*
@@ -342,7 +346,9 @@ void innings() {
   score.target = currentRuns;
   score.targetOvers = 40;
   score.targetBalls = 0;
-  EEPROM.writeBlock(0, score);
+  Serial.println("Writing 3");
+
+  EEPROM.writeBlock(eepromStart, score);
 }
 
 /*
