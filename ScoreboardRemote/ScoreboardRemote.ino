@@ -3,7 +3,7 @@
  * - 1602 LCD display
  * - 7 pushbuttons
  * - NRF24L01 2.4 GHz transceiver
- * - CC3000 Wifi breakout
+ * - WINC1500 Wifi breakout
  *
  * Scoreboard has concept of "plus" mode.  While in plus mode, any button presses won't
  * increment the number of balls.  This is used for recording multiple runs, multiple
@@ -15,8 +15,9 @@
  *        via the NRF24L01 and display on LCD
  */
 #include <LiquidCrystal.h>
-#include <EEPROM.h>
-#include <EEPROMAnything.h>
+
+#include <EEPROMex.h>
+#include <EEPROMVar.h>
 #include <Buttons.h>
 #include <ScoreboardCommon.h>
 #include <SPI.h>
@@ -113,7 +114,7 @@ void setup() {
   lcd.begin(16, 2);                             // Set the display to 16 columns and two rows
   lcd.clear();
   
-  EEPROM_readAnything(0, score);                // Read the saved score from EEPROM
+  EEPROM.readBlock(0, score);                  // Read the saved score from EEPROM
 
   initialiseRadio();
   wifiConnected = initialiseWiFi();
@@ -254,7 +255,7 @@ void clearMode() {
   }
   if (score.balls == 0                               // If it's the first ball of the over
       && !anyRepeating()) {                          // and we're not repeating (i.e. button held down)
-    EEPROM_writeAnything(0, score);                  // Store the current score in EEPROM
+    EEPROM.writeBlock(0, score);                  // Store the current score in EEPROM
   }
 }
 
@@ -326,7 +327,7 @@ void reset() {
   score.targetOvers = 0;
   score.targetBalls = 0;
   clearMode();
-  EEPROM_writeAnything(0, score);
+  EEPROM.writeBlock(0, score);
 }
 
 /*
@@ -341,7 +342,7 @@ void innings() {
   score.target = currentRuns;
   score.targetOvers = 40;
   score.targetBalls = 0;
-  EEPROM_writeAnything(0, score);
+  EEPROM.writeBlock(0, score);
 }
 
 /*
