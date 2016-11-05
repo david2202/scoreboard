@@ -25,7 +25,7 @@
 #include <Adafruit_WINC1500.h>
 #include <string.h>
 
-#define DEBUG
+// #define DEBUG
 
 // Define the WINC1500 board connections below.
 // If you're following the Adafruit WINC1500 board
@@ -37,8 +37,8 @@
 // Setup the WINC1500 connection with the pins above and the default hardware SPI.
 Adafruit_WINC1500 WiFi(WINC_CS, WINC_IRQ, WINC_RST);
 
-char ssid[] = "NETGEAR26";       //  your network SSID (name)
-//char ssid[] = "XT1068 4797";       //  your network SSID (name)
+//char ssid[] = "NETGEAR26";       //  your network SSID (name)
+char ssid[] = "XT1068 4797";       //  your network SSID (name)
 char pass[] = "rockycurtain281"; // your network password (use for WPA, or use as key for WEP)
 int keyIndex = 0;                // your network key Index number (needed only for WEP)
 
@@ -46,12 +46,13 @@ int status = WL_IDLE_STATUS;
 // if you don't want to use DNS (and reduce your sketch size)
 // use the numeric IP instead of the name for the server:
 //IPAddress server(141,101,112,175);  // numeric IP for test page (no DNS)
-char server[] = "192.168.0.96";    // domain name for test page (using DNS)
-int port = 8080;
+//char server[] = "192.168.0.96";    // domain name for test page (using DNS)
+//int port = 8080;
+char server[] = "scoreboard.zbtzhaj3sj.ap-southeast-2.elasticbeanstalk.com";
+int port = 80;
+boolean wifiConnected = false;
 
 // Initialize the Ethernet client library
-// with the IP address and port of the server
-// that you want to connect to (port 80 is default for HTTP):
 Adafruit_WINC1500Client client;
 
 #define IDLE_TIMEOUT_MS  3000
@@ -94,9 +95,6 @@ LiquidCrystal lcd(39, 38, 37, 36, 35, 34);      // create an lcd object and assi
 // Set up nRF24L01 radio on SPI bus plus pins 49 & 53 (as we are using a Mega)
 RF24 radio(49,53);
 
-//SPISettings settingsCC3000(SPI_CLOCK_DIV4, MSBFIRST, SPI_MODE0); 
-//SPISettings settingsRF24(SPI_CLOCK_DIV4, MSBFIRST, SPI_MODE0); 
-
 long modeOnTime = 0;                            // The time plus mode was turned on
 byte opMode = SCOREBOARD_OPMODE;
 int currentMode = NO_MODE;                      // NO_MODE, PLUS_MODE or MINUS_MODE
@@ -118,7 +116,7 @@ void setup() {
   EEPROM_readAnything(0, score);                // Read the saved score from EEPROM
 
   initialiseRadio();
-  initialiseWiFi();
+  wifiConnected = initialiseWiFi();
 
   lcd.clear();
   displayScore();                               // Display the score for the first time
@@ -133,7 +131,9 @@ void loop(){
       lcd.setCursor(15, 1);
       lcd.print(char(B01011100));
       sendScoreRadio();
-      sendScoreWiFi();
+      if (wifiConnected) {
+        sendScoreWiFi();
+      }
       lcd.setCursor(15, 1);
       lcd.print(F(" "));
       sendTime = millis();
@@ -150,18 +150,15 @@ void readButtons() {
 }
 
 void sendScoreRadio() {
-  //SPI.beginTransaction(settingsRF24);
   radio.stopListening();
   bool ok = radio.write(&score, sizeof(score));
   #ifdef DEBUG
     Serial.println(ok);
   #endif
   radio.startListening();
-  //SPI.endTransaction();
 }
 
 void sendScoreWiFi() {
-//  SPI.beginTransaction(settingsCC3000);
   // if you get a connection, report back via serial:
   if (client.connect(server, port)) {
     #ifdef DEBUG
@@ -208,12 +205,10 @@ void sendScoreWiFi() {
   #ifdef DEBUG
     Serial.println(F("-------------------------------------"));  
   #endif
-  //SPI.endTransaction();
 }
 
 void receiveResponseWiFi() {
-//  SPI.beginTransaction(settingsCC3000);
-    // Read any data that is available
+  // Read any data that is available
   while (client.available()) {
     char c = client.read();
     #ifdef DEBUG
@@ -228,7 +223,6 @@ void receiveResponseWiFi() {
     #endif
     client.stop();
   }
-  //SPI.endTransaction();
 }
 
 /*
@@ -556,7 +550,6 @@ void initialiseRadio() {
   // back and forth.
   // Open 'our' pipe for writing
   // Open the 'other' pipe for reading, in position #1 (we can have up to 5 pipes open for reading)
-  //SPI.beginTransaction(settingsRF24);
   radio.openWritingPipe(PIPES[0]);
   lcd.setCursor(7, 0);
   lcd.print(F("Writing "));
@@ -567,11 +560,9 @@ void initialiseRadio() {
   radio.startListening();
   lcd.setCursor(7, 0);
   lcd.print(F("Complete"));
-  //SPI.endTransaction();
 }
 
-void initialiseWiFi() {
-//  SPI.beginTransaction(settingsCC3000);
+boolean initialiseWiFi() {
   lcd.setCursor(0, 1);
   lcd.print(F("WiFi:  Starting"));
   #ifdef DEBUG
@@ -584,41 +575,47 @@ void initialiseWiFi() {
     #ifdef DEBUG
       Serial.println("WiFi shield not present");
     #endif
-    lcd.setCursor(0, 1);
-    lcd.print(F("WiFi:  Shield not present"));
-    while (true);
+    lcd.setCursor(7, 1);
+    lcd.print(F("Not present"));
+    delay(5000);
+    return false;
   }
 
   // attempt to connect to Wifi network:
-  while (WiFi.status() != WL_CONNECTED) {
-    lcd.setCursor(7, 1);
-    lcd.print("ssid");
-    #ifdef DEBUG
-      Serial.print(F("Attempting to connect to SSID: "));
-      Serial.println(ssid);
-    #endif
-    
-    // Connect to WPA/WPA2 network. Change this line if using open or WEP network:
-    status = WiFi.begin(ssid, pass);
+  lcd.setCursor(7, 1);
+  lcd.print(ssid);
+  lcd.print(F("        "));
+  #ifdef DEBUG
+    Serial.print(F("Attempting to connect to SSID: "));
+    Serial.println(ssid);
+  #endif
+  
+  // Connect to WPA/WPA2 network
+  status = WiFi.begin(ssid, pass);
 
-    // wait 10 seconds for connection:
-    uint8_t timeout = 10;
-    while (timeout && (WiFi.status() != WL_CONNECTED)) {
-      timeout--;
-      delay(1000);
-    }
+  // wait 10 seconds for connection:
+  uint8_t timeout = 10;
+  while (timeout && (WiFi.status() != WL_CONNECTED)) {
+    timeout--;
+    delay(1000);
   }
 
-  lcd.setCursor(7, 1);
-  lcd.print(F("Connected"));
-
-  #ifdef DEBUG
-    Serial.println(F("Connected!"));
-    displayConnectionDetails();
-  #endif
-
-  delay(1000);
-  //SPI.endTransaction();
+  if (WiFi.status() == WL_CONNECTED) {
+    lcd.setCursor(7, 1);
+    lcd.print(F("Connected"));
+    delay(1000);
+    
+    #ifdef DEBUG
+      Serial.println(F("Connected!"));
+      displayConnectionDetails();
+    #endif
+    return true;
+  } else {
+    lcd.setCursor(7, 1);
+    lcd.print(F("Failed"));
+    delay(1000);
+    return false;
+  }
 }
 
 /**************************************************************************/
