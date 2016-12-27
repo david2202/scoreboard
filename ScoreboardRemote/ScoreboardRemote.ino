@@ -40,8 +40,8 @@ Adafruit_WINC1500 WiFi(WINC_CS, WINC_IRQ, WINC_RST);
 
 //char ssid[] = "NETGEAR26";       //  your network SSID (name)
 char ssid[] = "XT1068 4797";       //  your network SSID (name)
-char pass[] = "rockycurtain281"; // your network password (use for WPA, or use as key for WEP)
-int keyIndex = 0;                // your network key Index number (needed only for WEP)
+char pass[] = "changeme";          // your network password (use for WPA, or use as key for WEP)
+int keyIndex = 0;                  // your network key Index number (needed only for WEP)
 
 int status = WL_IDLE_STATUS;
 // if you don't want to use DNS (and reduce your sketch size)
